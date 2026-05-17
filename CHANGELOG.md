@@ -5,6 +5,13 @@ Versions are managed automatically by [release-please](https://github.com/google
 
 <!-- next-release-here -->
 
+## [1.0.1](https://github.com/foxj77/mcp-skills-server/compare/v1.0.0...v1.0.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* polling bug, deep health probes, automated releases, single-replica docs ([2d7e441](https://github.com/foxj77/mcp-skills-server/commit/2d7e44105f321857aeda2186c03b5a215d886d69))
+
 ## [1.0.0](https://github.com/foxj77/mcp-skills-server/compare/v0.1.0...v1.0.0) (2026-05-17)
 
 
