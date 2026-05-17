@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Kubernetes-native MCP server that exposes skills from a Git repository as MCP tools over Streamable HTTP. Skills follow the standard `SKILL.md` convention (YAML frontmatter with `name` and `description`, followed by the prompt body). The server is built with FastMCP (Python) and wrapped by supergateway to serve Streamable HTTP.
+A Kubernetes-native MCP server that exposes skills from a Git repository as MCP tools over Streamable HTTP. Skills follow the standard `SKILL.md` convention (YAML frontmatter with `name` and `description`, followed by the prompt body). The server is a zero-dependency Node.js JSON-RPC implementation wrapped by supergateway to serve Streamable HTTP.
 
 ### Pod architecture
 
@@ -18,7 +18,7 @@ Each pod runs three containers sharing a single `emptyDir` volume mounted at `/s
 │  │ init: git-   │  │ sidecar:     │  │ main:             │ │
 │  │ clone        │  │ git-sync     │  │ mcp-skills-server │ │
 │  │              │  │              │  │                   │ │
-│  │ git clone →  │  │ git pull     │  │ FastMCP + super-  │ │
+│  │ git clone →  │  │ git pull     │  │ Node.js + super-  │ │
 │  │ /skills      │  │ every 15min  │  │ gateway :3000/mcp │ │
 │  │              │  │ + webhook    │  │                   │ │
 │  └──────────────┘  └──────────────┘  └───────────────────┘ │
@@ -32,10 +32,9 @@ Each pod runs three containers sharing a single `emptyDir` volume mounted at `/s
 ### Repository layout
 
 ```
-server.py              # FastMCP skills server (stdio, wrapped by supergateway)
-sidecar/sync.py        # Git sync sidecar (polling + webhook receiver)
+server.js              # Zero-dependency Node.js MCP skills server (stdio, CommonJS)
+sidecar/sync.js        # Git sync sidecar (polling + webhook receiver, CommonJS)
 Dockerfile             # Single image used by all three containers
-requirements.txt       # Python dependencies (fastmcp, pyyaml)
 package.json           # npm deps for Dependabot tracking (supergateway only)
 chart/
 ├── Chart.yaml
@@ -110,12 +109,14 @@ Skills are scanned from `SKILLS_DIR` at server startup. Each subdirectory contai
 
 ## Critical configuration constraints
 
-- **`--stateful` on supergateway is required.** Stateless mode spawns a new Python process per HTTP request, causing cold-start latency on every call and breaking MCP session continuity between `initialize` and `tools/call`. Do not remove this flag.
-- **`nodeHeapSizeMb` must be ≤ `resources.limits.memory / 2`.** The pod runs a Node.js process (supergateway) and a Python process. If the Node heap cap exceeds half the memory limit, the pod risks OOMKill.
+- **`--stateful` on supergateway is required.** Stateless mode spawns a new Node.js process per HTTP request, causing cold-start latency on every call and breaking MCP session continuity between `initialize` and `tools/call`. Do not remove this flag.
+- **`--stdio "node /app/server.js"` must be ONE string.** supergateway's `--stdio` flag takes a single string it splits internally. Passing `node` and `/app/server.js` as two separate Dockerfile CMD elements causes supergateway to only see `node` and launch the Node REPL. See the `CMD` line in Dockerfile.
+- **`nodeHeapSizeMb` must be ≤ `resources.limits.memory / 2`.** The pod runs two Node.js processes (supergateway + server). If the Node heap cap exceeds half the memory limit, the pod risks OOMKill.
 - **CA cert secret must be created before installing the chart.** The chart references an existing Secret by name and will not create it. Use SOPS for encryption: write plaintext to `/tmp`, encrypt with `sops --encrypt`, save as `.enc.yaml` in the repo, delete `/tmp` file.
 - **PAT token embedded in `.git/config`.** The init container embeds the PAT in the git remote URL (stored in `.git/config` on the emptyDir). The sidecar inherits this for `git pull`. The PAT is not exposed in environment variables of the main skills server container.
 - **`imagePullPolicy: IfNotPresent`** is the default and correct for pinned version tags. If tracking a mutable tag such as `latest` in examples, use `Always`.
 - **`--outputTransport streamableHttp`** is required. SSE transport is legacy and not supported by kagent.
+- **server.js and sidecar/sync.js use CommonJS (`require()`).** There is no `"type": "module"` in package.json. Do not convert to ESM — Node.js on Alpine requires explicit `.mjs` or a module-type package.json for ESM, and the image has neither.
 
 ## npm package versions
 
