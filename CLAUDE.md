@@ -35,7 +35,7 @@ Each pod runs three containers sharing a single `emptyDir` volume mounted at `/s
 server.py              # FastMCP skills server (stdio, wrapped by supergateway)
 sidecar/sync.py        # Git sync sidecar (polling + webhook receiver)
 Dockerfile             # Single image used by all three containers
-requirements.txt       # Python dependencies (fastmcp, pyyaml)
+requirements.txt       # Python dependencies (mcp, pyyaml)
 package.json           # npm deps for Dependabot tracking (supergateway only)
 chart/
 ├── Chart.yaml

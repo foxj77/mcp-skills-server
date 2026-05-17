@@ -7,21 +7,20 @@ read from disk on every invocation (lazy reload) so updated skill bodies are
 served without a restart. New skills added after startup require a pod restart
 to appear in tools/list — this is a known v1 limitation documented in CLAUDE.md.
 """
+import asyncio
 import os
 import sys
-import threading
-import time
 from pathlib import Path
 
 import yaml
-from fastmcp import FastMCP
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+import mcp.types as types
 
 SKILLS_DIR = Path(os.environ.get("SKILLS_DIR", "/skills"))
 SERVER_NAME = os.environ.get("SERVER_NAME", "mcp-skills-server")
 
-mcp = FastMCP(SERVER_NAME)
-
-_registered: set[str] = set()
+app = Server(SERVER_NAME)
 
 
 def _parse_skill_file(path: Path) -> tuple[dict, str]:
@@ -38,45 +37,55 @@ def _parse_skill_file(path: Path) -> tuple[dict, str]:
     return {}, content.strip()
 
 
-def _register_skill(skill_dir: Path) -> None:
-    skill_file = skill_dir / "SKILL.md"
-    if not skill_file.exists():
-        return
-
-    fm, _ = _parse_skill_file(skill_file)
-    name = fm.get("name") or skill_dir.name
-    description = fm.get("description") or f"Skill: {name}"
-
-    if name in _registered:
-        return
-
-    # Capture skill_file path in closure for lazy disk reads on each call.
-    def _make_handler(sf: Path, _name: str, _desc: str):
-        def handler() -> str:
-            _, body = _parse_skill_file(sf)
-            return body
-
-        handler.__name__ = _name
-        handler.__doc__ = _desc
-        return handler
-
-    mcp.tool(name=name, description=description)(_make_handler(skill_file, name, description))
-    _registered.add(name)
-    print(f"registered skill: {name}", flush=True)
-
-
-def _scan_skills() -> None:
+def _load_skills() -> dict[str, tuple[str, Path]]:
+    """Scan SKILLS_DIR and return {name: (description, skill_file_path)}."""
+    skills: dict[str, tuple[str, Path]] = {}
     if not SKILLS_DIR.exists():
         print(f"SKILLS_DIR {SKILLS_DIR} does not exist — no skills loaded", file=sys.stderr, flush=True)
-        return
+        return skills
     for item in sorted(SKILLS_DIR.iterdir()):
         if item.is_dir():
-            _register_skill(item)
+            skill_file = item / "SKILL.md"
+            if skill_file.exists():
+                fm, _ = _parse_skill_file(skill_file)
+                name = fm.get("name") or item.name
+                description = fm.get("description") or f"Skill: {name}"
+                skills[name] = (description, skill_file)
+                print(f"registered skill: {name}", flush=True)
+    return skills
 
 
-_scan_skills()
-print(f"startup scan complete: {len(_registered)} skill(s) registered", flush=True)
+_skills = _load_skills()
+print(f"startup scan complete: {len(_skills)} skill(s) registered", flush=True)
+
+
+@app.list_tools()
+async def list_tools() -> list[types.Tool]:
+    return [
+        types.Tool(
+            name=name,
+            description=description,
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        )
+        for name, (description, _) in _skills.items()
+    ]
+
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+    if name not in _skills:
+        raise ValueError(f"Unknown skill: {name}")
+    _, skill_file = _skills[name]
+    # Lazy reload: re-read from disk on every call so updated content is served
+    # without a restart.
+    _, body = _parse_skill_file(skill_file)
+    return [types.TextContent(type="text", text=body)]
+
+
+async def _main() -> None:
+    async with stdio_server() as (read_stream, write_stream):
+        await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    asyncio.run(_main())
