@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 Versions are managed automatically by [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org/).
 
 <!-- next-release-here -->
+<!-- CI check: this line verifies PR checks are wired up correctly -->
 
 ## 0.1.0 (initial release)
 
