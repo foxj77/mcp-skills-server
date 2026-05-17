@@ -1,7 +1,6 @@
 {
   "name": "mcp-skills-server",
   "version": "0.1.0",
-  "type": "module",
   "private": true,
   "description": "Git-synced MCP skills server for Kubernetes. Tracks npm dependencies for Dependabot; versions must stay in sync with the RUN npm install -g line in the Dockerfile.",
   "dependencies": {

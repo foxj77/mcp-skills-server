@@ -1,18 +1,12 @@
 #!/usr/bin/env node
 /**
- * Git sync sidecar.
- *
- * 1. Polls: runs `git pull` every GIT_SYNC_INTERVAL_SECONDS (default 900).
- * 2. Webhook (optional): receives POST /webhook from GitHub/GitLab and triggers
- *    an immediate git pull. Supports GitHub HMAC-SHA256 and GitLab token auth.
- *
- * The SKILLS_DIR is already cloned by the init container. Credentials embedded
- * in the remote URL by the init container are preserved in .git/config, so git
- * pull requires no additional auth configuration here.
+ * Git sync sidecar — polling + optional webhook receiver.
+ * CommonJS to avoid ESM/package.json dependency.
  */
-import { execFile } from 'child_process';
-import { createServer } from 'http';
-import crypto from 'crypto';
+'use strict';
+const { execFile } = require('child_process');
+const { createServer } = require('http');
+const crypto = require('crypto');
 
 const SKILLS_DIR = process.env.SKILLS_DIR || '/skills';
 const SYNC_INTERVAL = parseInt(process.env.GIT_SYNC_INTERVAL_SECONDS || '900', 10);
@@ -26,20 +20,19 @@ let pulling = false;
 function gitPull() {
   if (pulling) return;
   pulling = true;
-  const env = { ...process.env };
+  const env = Object.assign({}, process.env);
   if (GIT_SSL_CAINFO) env.GIT_SSL_CAINFO = GIT_SSL_CAINFO;
 
   execFile('git', ['-C', SKILLS_DIR, 'pull', '--ff-only'], { env }, (err, stdout, stderr) => {
     pulling = false;
     if (err) {
-      console.error(`git pull failed: ${stderr.trim()}`);
+      console.error('git pull failed:', stderr.trim());
     } else {
-      console.log(`git pull: ${stdout.trim() || 'already up to date'}`);
+      console.log('git pull:', stdout.trim() || 'already up to date');
     }
   });
 }
 
-// Polling loop
 setInterval(gitPull, SYNC_INTERVAL * 1000);
 console.log(`polling sync started (interval=${SYNC_INTERVAL}s)`);
 
@@ -49,12 +42,10 @@ if (WEBHOOK_ENABLED) {
       res.writeHead(404).end();
       return;
     }
-
     let body = Buffer.alloc(0);
-    req.on('data', chunk => { body = Buffer.concat([body, chunk]); });
+    req.on('data', (chunk) => { body = Buffer.concat([body, chunk]); });
     req.on('end', () => {
       if (WEBHOOK_SECRET) {
-        // GitHub: X-Hub-Signature-256: sha256=<hex>
         const ghSig = req.headers['x-hub-signature-256'] || '';
         if (ghSig.startsWith('sha256=')) {
           const expected = 'sha256=' + crypto.createHmac('sha256', WEBHOOK_SECRET).update(body).digest('hex');
@@ -63,23 +54,20 @@ if (WEBHOOK_ENABLED) {
             return;
           }
         } else {
-          // GitLab: X-Gitlab-Token: <plain token>
           const glToken = req.headers['x-gitlab-token'] || '';
-          const expectedBuf = Buffer.from(WEBHOOK_SECRET);
-          const actualBuf = Buffer.from(glToken);
-          if (expectedBuf.length !== actualBuf.length || !crypto.timingSafeEqual(expectedBuf, actualBuf)) {
+          const eb = Buffer.from(WEBHOOK_SECRET);
+          const ab = Buffer.from(glToken);
+          if (eb.length !== ab.length || !crypto.timingSafeEqual(eb, ab)) {
             res.writeHead(401).end();
             return;
           }
         }
       }
-
       res.writeHead(200).end();
       console.log('webhook received — triggering git pull');
       gitPull();
     });
   });
-
   httpServer.listen(WEBHOOK_PORT, '0.0.0.0', () => {
     console.log(`webhook receiver listening on :${WEBHOOK_PORT}/webhook`);
   });
