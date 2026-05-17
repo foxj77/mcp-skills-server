@@ -5,39 +5,68 @@
     "image": {
       "type": "object",
       "properties": {
-        "repository": { "type": "string" },
-        "tag":        { "type": "string" },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
         "pullPolicy": {
           "type": "string",
-          "enum": ["Always", "IfNotPresent", "Never"]
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
         }
       }
     },
     "server": {
       "type": "object",
       "properties": {
-        "name": { "type": "string", "minLength": 1 }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "required": ["name"]
+      "required": [
+        "name"
+      ]
     },
     "git": {
       "type": "object",
       "properties": {
-        "repoUrl":             { "type": "string" },
-        "branch":              { "type": "string", "minLength": 1 },
-        "syncIntervalSeconds": { "type": "integer", "minimum": 60 },
+        "repoUrl": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "syncIntervalSeconds": {
+          "type": "integer",
+          "minimum": 60
+        },
         "patSecret": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "key":  { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
           }
         },
         "caSecret": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "key":  { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
           }
         }
       }
@@ -45,23 +74,43 @@
     "webhook": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "port":    { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "hmacSecret": {
           "type": "object",
           "properties": {
-            "name": { "type": "string" },
-            "key":  { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            }
           }
         },
         "ingress": {
           "type": "object",
           "properties": {
-            "enabled":   { "type": "boolean" },
-            "className": { "type": "string" },
-            "host":      { "type": "string" },
-            "annotations": { "type": "object" },
-            "tls": { "type": "array" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "className": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "tls": {
+              "type": "array"
+            }
           }
         }
       }
@@ -71,7 +120,11 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["ClusterIP", "NodePort", "LoadBalancer"]
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
         },
         "port": {
           "type": "integer",
@@ -91,15 +144,23 @@
         "requests": {
           "type": "object",
           "properties": {
-            "cpu":    { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
           }
         },
         "limits": {
           "type": "object",
           "properties": {
-            "cpu":    { "type": "string" },
-            "memory": { "type": "string" }
+            "cpu": {
+              "type": "string"
+            },
+            "memory": {
+              "type": "string"
+            }
           }
         }
       }
@@ -107,12 +168,26 @@
     "kagent": {
       "type": "object",
       "properties": {
-        "enabled":       { "type": "boolean" },
-        "namespace":     { "type": "string", "minLength": 1 },
-        "serverName":    { "type": "string", "minLength": 1 },
-        "description":   { "type": "string" },
-        "timeout":       { "type": "string" },
-        "sseReadTimeout":{ "type": "string" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "serverName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "sseReadTimeout": {
+          "type": "string"
+        }
       }
     }
   }

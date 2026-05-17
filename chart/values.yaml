@@ -83,9 +83,9 @@ service:
   port: 3000
 
 # Node.js heap size cap in MiB applied to supergateway via NODE_OPTIONS.
-# The skills server has one Node.js process (supergateway) and one Python
-# child process. Only the Node.js heap is capped here; Python memory is
-# bounded by resources.limits.memory minus this value.
+# The pod runs two Node.js processes: supergateway (parent) and server.js
+# (child). This cap applies to supergateway's V8 heap only; the child process
+# has its own heap and is not separately capped.
 # Rule: nodeHeapSizeMb must be ≤ (resources.limits.memory / 2).
 nodeHeapSizeMb: 128
 
@@ -99,17 +99,34 @@ resources:
     # Default 384Mi = 128Mi Node heap + ~128Mi Python + 128Mi headroom.
     memory: 384Mi
 
-# Probes use tcpSocket rather than httpGet because the MCP endpoint requires
-# a valid JSON-RPC initialize message before returning a non-error response.
-# A plain HTTP GET returns 4xx, which Kubernetes would interpret as unhealthy.
+# Probes use an exec command (node /app/healthcheck.js) that sends a real
+# MCP initialize request and checks for a valid JSON-RPC result in the SSE
+# response. This catches failures in the Node.js child process that a
+# tcpSocket probe misses — supergateway keeps the TCP port open even when
+# the child is unresponsive, so tcpSocket gives false-green results.
+# timeoutSeconds must exceed the healthcheck's internal 5 s HTTP timeout.
 readinessProbe:
   initialDelaySeconds: 10
   periodSeconds: 10
+  timeoutSeconds: 10
 
 livenessProbe:
   initialDelaySeconds: 20
   periodSeconds: 20
   failureThreshold: 3
+  timeoutSeconds: 10
+
+# ── Replica count ────────────────────────────────────────────────────────────
+# replicaCount is intentionally NOT a configurable value. The Deployment is
+# hardcoded to replicas: 1 because all three containers (init, sidecar, main)
+# share an emptyDir volume at /skills. Multiple replicas would each maintain
+# their own independent emptyDir, so pods could serve different skill versions
+# mid-sync. A single pod guarantees all clients see the same skill content.
+#
+# If you need high availability, run multiple independent Helm releases each
+# pointing at the same skills repo — one per availability zone or cluster.
+# Do NOT use kubectl scale on this Deployment; the setting will be ignored
+# on the next Helm reconciliation.
 
 podAnnotations: {}
 podLabels: {}

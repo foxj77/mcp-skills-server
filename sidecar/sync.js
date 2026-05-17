@@ -25,16 +25,17 @@ function gitPull() {
   });
 }
 
-// Polling sync
+// Polling sync — always runs regardless of webhook setting.
 setInterval(gitPull, SYNC_INTERVAL * 1000);
 process.stderr.write(`git-sync started: polling every ${SYNC_INTERVAL}s, SKILLS_DIR=${SKILLS_DIR}\n`);
 
 if (!WEBHOOK_ENABLED) {
-  process.stderr.write('webhook disabled\n');
-  process.exit(0); // keep the process alive via the interval
+  process.stderr.write('webhook disabled — polling only\n');
+  // Do NOT exit here: the setInterval above must keep running.
+  return;
 }
 
-// Webhook server
+// Webhook server — only started when WEBHOOK_ENABLED=true.
 const server = createServer((req, res) => {
   if (req.method !== 'POST' || req.url !== '/webhook') {
     res.writeHead(404);

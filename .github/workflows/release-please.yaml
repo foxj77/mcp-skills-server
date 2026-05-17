@@ -2,14 +2,13 @@ name: Release Please
 
 # Runs on every push to main. Reads conventional commits since the last
 # release, then creates or updates a release PR that bumps version.txt and
-# CHANGELOG.md. Merging the PR creates the GitHub Release and SemVer tag,
-# which in turn triggers the publish workflow to build and push the image.
+# CHANGELOG.md. When the release PR is merged, release-please creates the
+# GitHub Release and SemVer tag, then this workflow dispatches publish.yaml
+# so the image and Helm chart are built and pushed automatically.
 #
-# PAT note: GITHUB_TOKEN cannot trigger downstream workflows (publish.yaml).
-# Add a classic PAT with repo + workflow scopes as the secret RELEASE_PLEASE_TOKEN
-# and it will be used instead, so merging the release PR automatically triggers
-# the publish workflow. Without it, publish.yaml can be triggered manually via
-# workflow_dispatch with the version input.
+# No PAT required: workflow_dispatch (used here to trigger publish) works
+# with GITHUB_TOKEN + actions:write — only the release: published event is
+# blocked by GITHUB_TOKEN. This avoids the need to manage a separate PAT.
 
 on:
   push:
@@ -20,6 +19,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   release-please:
@@ -27,7 +27,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           config-file: .github/release-please-config.json
           manifest-file: .release-please-manifest.json
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          token: ${{ github.token }}
+
+      - name: Trigger publish workflow
+        if: ${{ steps.release.outputs.release_created }}
+        run: |
+          gh workflow run publish.yaml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            -f version="${{ steps.release.outputs.version }}"
+        env:
+          GH_TOKEN: ${{ github.token }}

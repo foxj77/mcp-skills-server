@@ -1,3 +1,17 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠  Single-replica deployment — do not scale
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This Deployment is fixed at 1 replica and ignores kubectl scale.
+
+Reason: the init container, git-sync sidecar, and skills server all
+share an emptyDir volume at /skills. Each replica gets its own
+independent emptyDir, so pods would serve different skill versions
+mid-sync. One pod guarantees all clients see the same content.
+
+For HA, run one Helm release per availability zone or cluster, each
+pointing at the same upstream skills repo.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 MCP Skills Server is running.
 
 The MCP Streamable HTTP endpoint is available inside the cluster at:

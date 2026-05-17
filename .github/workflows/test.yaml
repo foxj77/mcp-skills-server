@@ -88,7 +88,8 @@ jobs:
           helm template mcp-skills-server chart/ --namespace test > /tmp/default-render.yaml
           grep -q "SKILLS_DIR" /tmp/default-render.yaml
           grep -q "/skills" /tmp/default-render.yaml
-          echo "SKILLS_DIR present in rendered Deployment"
+          grep -q "healthcheck.js" /tmp/default-render.yaml
+          echo "SKILLS_DIR and healthcheck probe present in rendered Deployment"
 
       - name: Template chart (custom values)
         run: |

@@ -5,8 +5,9 @@ RUN apk add --no-cache git
 
 RUN npm install -g supergateway@3.4.3
 
-COPY server.js /app/server.js
-COPY sidecar/  /app/sidecar/
+COPY server.js       /app/server.js
+COPY healthcheck.js  /app/healthcheck.js
+COPY sidecar/        /app/sidecar/
 
 EXPOSE 3000
 

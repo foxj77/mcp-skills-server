@@ -33,6 +33,7 @@ Each pod runs three containers sharing a single `emptyDir` volume mounted at `/s
 
 ```
 server.js              # Zero-dependency Node.js MCP skills server (stdio, CommonJS)
+healthcheck.js         # Kubernetes probe script — sends real MCP initialize, exits 0 on valid result
 sidecar/sync.js        # Git sync sidecar (polling + webhook receiver, CommonJS)
 Dockerfile             # Single image used by all three containers
 package.json           # npm deps for Dependabot tracking (supergateway only)
@@ -110,6 +111,9 @@ Skills are scanned from `SKILLS_DIR` at server startup. Each subdirectory contai
 ## Critical configuration constraints
 
 - **`--stateful` on supergateway is required.** Stateless mode spawns a new Node.js process per HTTP request, causing cold-start latency on every call and breaking MCP session continuity between `initialize` and `tools/call`. Do not remove this flag.
+- **Liveness/readiness probes use `exec: node /app/healthcheck.js`.** This sends a real MCP `initialize` request. Do not revert to `tcpSocket` — supergateway keeps the port open even when the child process is dead, giving false-green results.
+- **`sidecar/sync.js` must not call `process.exit()` when webhook is disabled.** The `setInterval` for polling runs in the same process. Exiting kills it and stops all sync.
+- **Releases are fully automated.** Merging a release-please PR triggers the publish workflow automatically via `gh workflow run` in the release-please workflow. No manual trigger needed.
 - **`--stdio "node /app/server.js"` must be ONE string.** supergateway's `--stdio` flag takes a single string it splits internally. Passing `node` and `/app/server.js` as two separate Dockerfile CMD elements causes supergateway to only see `node` and launch the Node REPL. See the `CMD` line in Dockerfile.
 - **`nodeHeapSizeMb` must be ≤ `resources.limits.memory / 2`.** The pod runs two Node.js processes (supergateway + server). If the Node heap cap exceeds half the memory limit, the pod risks OOMKill.
 - **CA cert secret must be created before installing the chart.** The chart references an existing Secret by name and will not create it. Use SOPS for encryption: write plaintext to `/tmp`, encrypt with `sops --encrypt`, save as `.enc.yaml` in the repo, delete `/tmp` file.
