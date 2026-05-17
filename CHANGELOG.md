@@ -5,6 +5,18 @@ Versions are managed automatically by [release-please](https://github.com/google
 
 <!-- next-release-here -->
 
+## [1.0.0](https://github.com/foxj77/mcp-skills-server/compare/v0.1.0...v1.0.0) (2026-05-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* server runtime is now Node.js; Python files removed
+
+### Features
+
+* initial release — Git-synced MCP skills server for Kubernetes ([6d55809](https://github.com/foxj77/mcp-skills-server/commit/6d558098360b8dfee0d3ca4de3946d461ee834ea))
+* rewrite server from Python/FastMCP to zero-dependency Node.js ([9836135](https://github.com/foxj77/mcp-skills-server/commit/9836135c7e6ddce5d7fe72646e45816c9c32bf8f))
+
 ## 0.1.0 (initial release)
 
 - FastMCP skills server wrapped in supergateway for MCP Streamable HTTP
