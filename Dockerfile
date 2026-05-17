@@ -19,5 +19,4 @@ ENV SERVER_NAME=mcp-skills-server
 #                                    cold-start latency on every call and breaking MCP session
 #                                    continuity between initialize and tools/call)
 CMD ["supergateway", "--port", "3000", "--outputTransport", "streamableHttp", \
-     "--stateful", "--stdio", \
-     "node", "/app/server.js"]
+     "--stateful", "--stdio", "node /app/server.js"]

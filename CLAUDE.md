@@ -109,6 +109,7 @@ Skills are scanned from `SKILLS_DIR` at server startup. Each subdirectory contai
 
 ## Critical configuration constraints
 
+- **`--stdio "node /app/server.js"` must be a single string.** supergateway's `--stdio` flag takes one string it splits internally — passing `node` and `/app/server.js` as separate Docker CMD tokens causes supergateway to launch just `node` (the REPL) and ignore the path.
 - **`--stateful` on supergateway is required.** Stateless mode spawns a new Python process per HTTP request, causing cold-start latency on every call and breaking MCP session continuity between `initialize` and `tools/call`. Do not remove this flag.
 - **`nodeHeapSizeMb` must be ≤ `resources.limits.memory / 2`.** The pod runs a Node.js process (supergateway) and a Python process. If the Node heap cap exceeds half the memory limit, the pod risks OOMKill.
 - **CA cert secret must be created before installing the chart.** The chart references an existing Secret by name and will not create it. Use SOPS for encryption: write plaintext to `/tmp`, encrypt with `sops --encrypt`, save as `.enc.yaml` in the repo, delete `/tmp` file.
