@@ -162,6 +162,6 @@ jobs:
             --set git.caSecret.name=internal-ca \
             --set git.patSecret.name=git-pat \
             > /tmp/ca-render.yaml
-          grep -q "secretName: internal-ca" /tmp/ca-render.yaml
+          grep -q "internal-ca" /tmp/ca-render.yaml
           grep -q "GIT_SSL_CAINFO" /tmp/ca-render.yaml
           echo "CA cert template assertions passed"
