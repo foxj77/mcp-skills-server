@@ -45,7 +45,7 @@ mcp_call() {
         --argjson a "$args_json" \
         --argjson id "$CALL_ID" \
         '{jsonrpc:"2.0", id:$id, method:"tools/call", params:{name:$t, arguments:$a}}')
-    curl -sf -X POST "$MCP_URL" \
+    curl -sf --max-time 10 -X POST "$MCP_URL" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json, text/event-stream" \
         -H "mcp-session-id: $SESSION_ID" \
@@ -57,7 +57,7 @@ mcp_call() {
 _header "1  Initialize session"
 _info "Connecting to $MCP_URL"
 
-INIT_RESP=$(curl -siSf -X POST "$MCP_URL" \
+INIT_RESP=$(curl -siSf --max-time 10 -X POST "$MCP_URL" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1.0"}}}' 2>&1) || {
@@ -81,7 +81,7 @@ fi
 _header "2  List tools"
 
 CALL_ID=$((CALL_ID + 1))
-TOOLS_RESP=$(curl -sf -X POST "$MCP_URL" \
+TOOLS_RESP=$(curl -sf --max-time 10 -X POST "$MCP_URL" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "mcp-session-id: $SESSION_ID" \
