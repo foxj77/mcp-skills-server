@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 /**
- * MCP skills server — exposes skills from a Git-synced directory as MCP tools.
+ * MCP skills server — zero-dependency implementation over stdio.
  *
- * Each subdirectory under SKILLS_DIR containing a SKILL.md with YAML frontmatter
- * (name, description) is registered as an MCP tool. Tool content is re-read from
- * disk on every call (lazy reload) so updated skill bodies are served without a
- * restart. New skills added after startup require a pod restart to appear in
+ * MCP is JSON-RPC 2.0 over newline-delimited stdio. Each message from
+ * supergateway arrives as one JSON line on stdin; each response is one JSON
+ * line on stdout. No SDK required.
+ *
+ * Skills are scanned from SKILLS_DIR at startup. Tool content is re-read from
+ * disk on every call (lazy reload) so updated skill bodies are served without
+ * a restart. New skills added after startup require a pod restart to appear in
  * tools/list — known v1 limitation.
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
 import path from 'path';
+import readline from 'readline';
 
 const SKILLS_DIR = process.env.SKILLS_DIR || '/skills';
 const SERVER_NAME = process.env.SERVER_NAME || 'mcp-skills-server';
@@ -21,16 +22,16 @@ const SERVER_NAME = process.env.SERVER_NAME || 'mcp-skills-server';
 function parseSkillFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   if (content.startsWith('---')) {
-    const parts = content.split(/^---$/m);
-    if (parts.length >= 3) {
+    const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    if (match) {
       const fm = {};
-      for (const line of parts[1].trim().split('\n')) {
+      for (const line of match[1].split('\n')) {
         const idx = line.indexOf(':');
         if (idx > 0) {
           fm[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
         }
       }
-      return { frontmatter: fm, body: parts.slice(2).join('---').trim() };
+      return { frontmatter: fm, body: match[2].trim() };
     }
   }
   return { frontmatter: {}, body: content.trim() };
@@ -40,11 +41,10 @@ function parseSkillFile(filePath) {
 function loadSkills() {
   const skills = new Map();
   if (!fs.existsSync(SKILLS_DIR)) {
-    console.error(`SKILLS_DIR ${SKILLS_DIR} does not exist — no skills loaded`);
+    process.stderr.write(`SKILLS_DIR ${SKILLS_DIR} does not exist — no skills loaded\n`);
     return skills;
   }
-  const entries = fs.readdirSync(SKILLS_DIR).sort();
-  for (const entry of entries) {
+  for (const entry of fs.readdirSync(SKILLS_DIR).sort()) {
     const skillDir = path.join(SKILLS_DIR, entry);
     const skillFile = path.join(skillDir, 'SKILL.md');
     try {
@@ -53,41 +53,82 @@ function loadSkills() {
         const name = frontmatter.name || entry;
         const description = frontmatter.description || `Skill: ${name}`;
         skills.set(name, { description, skillFile });
-        console.error(`registered skill: ${name}`);
+        process.stderr.write(`registered skill: ${name}\n`);
       }
     } catch (err) {
-      console.error(`skipping ${entry}: ${err.message}`);
+      process.stderr.write(`skipping ${entry}: ${err.message}\n`);
     }
   }
   return skills;
 }
 
 const skills = loadSkills();
-console.error(`startup scan complete: ${skills.size} skill(s) registered`);
+process.stderr.write(`startup scan complete: ${skills.size} skill(s) registered\n`);
 
-const server = new Server(
-  { name: SERVER_NAME, version: '1.0.0' },
-  { capabilities: { tools: {} } },
-);
+/** Send a JSON-RPC response to stdout. */
+function send(obj) {
+  process.stdout.write(JSON.stringify(obj) + '\n');
+}
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: Array.from(skills.entries()).map(([name, { description }]) => ({
+/** Build the tools list. */
+function toolsList() {
+  return Array.from(skills.entries()).map(([name, { description }]) => ({
     name,
     description,
     inputSchema: { type: 'object', properties: {}, required: [] },
-  })),
-}));
+  }));
+}
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name } = request.params;
-  if (!skills.has(name)) {
-    throw new Error(`Unknown skill: ${name}`);
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+
+rl.on('line', (line) => {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  let msg;
+  try {
+    msg = JSON.parse(trimmed);
+  } catch {
+    return; // ignore unparseable input
   }
-  // Lazy reload: re-read from disk on every call so updated content is served
-  // without a pod restart.
-  const { body } = parseSkillFile(skills.get(name).skillFile);
-  return { content: [{ type: 'text', text: body }] };
+
+  // Notifications have no id and need no response.
+  if (msg.id === undefined && msg.method !== undefined) return;
+
+  switch (msg.method) {
+    case 'initialize':
+      send({
+        jsonrpc: '2.0',
+        id: msg.id,
+        result: {
+          protocolVersion: msg.params?.protocolVersion ?? '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: SERVER_NAME, version: '1.0.0' },
+        },
+      });
+      break;
+
+    case 'tools/list':
+      send({ jsonrpc: '2.0', id: msg.id, result: { tools: toolsList() } });
+      break;
+
+    case 'tools/call': {
+      const name = msg.params?.name;
+      if (!skills.has(name)) {
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: `Unknown skill: ${name}` } });
+      } else {
+        // Lazy reload: re-read from disk on every call.
+        const { body } = parseSkillFile(skills.get(name).skillFile);
+        send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: body }] } });
+      }
+      break;
+    }
+
+    default:
+      if (msg.id !== undefined) {
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } });
+      }
+  }
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+rl.on('close', () => process.exit(0));

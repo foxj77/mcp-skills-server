@@ -5,10 +5,6 @@ RUN apk add --no-cache git
 
 RUN npm install -g supergateway@3.4.3
 
-# Install app dependencies into /app so they are importable by server.js and sidecar/sync.js.
-COPY package.json /app/package.json
-RUN cd /app && npm install --production --no-package-lock
-
 COPY server.js /app/server.js
 COPY sidecar/  /app/sidecar/
 
