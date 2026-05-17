@@ -100,7 +100,7 @@ spec:
         - name: git-sync
           image: {{ include "mcp-skills-server.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["python3", "/app/sidecar/sync.py"]
+          command: ["node", "/app/sidecar/sync.js"]
           env:
             - name: SKILLS_DIR
               value: /skills

@@ -1,8 +1,11 @@
 {
   "name": "mcp-skills-server",
+  "version": "0.1.0",
+  "type": "module",
   "private": true,
-  "description": "Tracks Dockerfile npm dependencies for Dependabot version updates. Not installed locally — versions here must stay in sync with the RUN npm install -g line in the Dockerfile.",
+  "description": "Git-synced MCP skills server for Kubernetes — exposes SKILL.md files as MCP tools over Streamable HTTP. Tracks npm dependencies for Dependabot version updates; versions here must stay in sync with the RUN npm install -g line in the Dockerfile.",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.11.2",
     "supergateway": "3.4.3"
   }
 }
