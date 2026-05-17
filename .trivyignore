@@ -1,0 +1,4 @@
+# Trivy CVE suppressions — each entry must document why it is accepted.
+#
+# Review this file when updating the base image or dependencies. Once the
+# underlying fix is pulled in, remove the entry so scanning stays honest.

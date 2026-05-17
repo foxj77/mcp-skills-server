@@ -1,0 +1,209 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mcp-skills-server.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcp-skills-server.labels" . | nindent 4 }}
+spec:
+  # Replicas is intentionally fixed at 1 and is not a configurable value.
+  # The skills volume is an emptyDir shared across all three containers in
+  # the pod (init + sidecar + main). Multiple replicas would each maintain
+  # their own independent emptyDir, giving different pods potentially
+  # different skill versions mid-sync. A single pod guarantees consistency.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "mcp-skills-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mcp-skills-server.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      # ── Init container: clone the skills repository ──────────────────────
+      # Runs to completion before the main container starts. The readiness
+      # probe on the main container will not pass until the clone succeeds
+      # and skills are scanned at startup, providing an implicit health gate.
+      initContainers:
+        - name: git-clone
+          image: {{ include "mcp-skills-server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+
+              REPO_URL="${GIT_REPO_URL}"
+
+              # Inject PAT into the HTTPS URL so git authenticates automatically.
+              # The URL with embedded credentials is stored in .git/config on the
+              # shared volume; the sidecar's git pull inherits it without needing
+              # to re-inject credentials.
+              if [ -n "${GIT_PAT}" ]; then
+                SCHEME=$(printf '%s' "$REPO_URL" | cut -d: -f1)
+                REST=$(printf '%s' "$REPO_URL" | cut -d/ -f3-)
+                REPO_URL="${SCHEME}://oauth2:${GIT_PAT}@${REST}"
+              fi
+
+              # Trust the internal CA if provided.
+              if [ -n "${GIT_SSL_CAINFO}" ]; then
+                git config --global http.sslCAInfo "${GIT_SSL_CAINFO}"
+              fi
+
+              echo "Cloning ${GIT_REPO_URL} (branch: ${GIT_BRANCH})..."
+              git clone --depth 1 --branch "${GIT_BRANCH}" "$REPO_URL" /skills
+              echo "Clone complete. Skills directory contents:"
+              ls /skills
+          env:
+            - name: GIT_REPO_URL
+              value: {{ .Values.git.repoUrl | quote }}
+            - name: GIT_BRANCH
+              value: {{ .Values.git.branch | quote }}
+            {{- if .Values.git.patSecret.name }}
+            - name: GIT_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.git.patSecret.name | quote }}
+                  key: {{ .Values.git.patSecret.key | quote }}
+            {{- end }}
+            {{- if .Values.git.caSecret.name }}
+            - name: GIT_SSL_CAINFO
+              value: /certs/ca.crt
+            {{- end }}
+          volumeMounts:
+            - name: skills
+              mountPath: /skills
+            {{- if .Values.git.caSecret.name }}
+            - name: ca-cert
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+
+      containers:
+        # ── Sidecar: git sync and optional webhook receiver ─────────────────
+        # Runs git pull on a polling interval and, when webhook.enabled=true,
+        # receives POST /webhook from GitHub/GitLab to trigger immediate syncs.
+        # Shares the /skills emptyDir with the main container; the skills server
+        # reads updated skill content lazily on the next tool invocation.
+        - name: git-sync
+          image: {{ include "mcp-skills-server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python3", "/app/sidecar/sync.py"]
+          env:
+            - name: SKILLS_DIR
+              value: /skills
+            - name: GIT_SYNC_INTERVAL_SECONDS
+              value: {{ .Values.git.syncIntervalSeconds | quote }}
+            - name: WEBHOOK_ENABLED
+              value: {{ .Values.webhook.enabled | quote }}
+            {{- if .Values.webhook.enabled }}
+            - name: WEBHOOK_PORT
+              value: {{ .Values.webhook.port | quote }}
+            {{- if .Values.webhook.hmacSecret.name }}
+            - name: WEBHOOK_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.webhook.hmacSecret.name | quote }}
+                  key: {{ .Values.webhook.hmacSecret.key | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if .Values.git.caSecret.name }}
+            - name: GIT_SSL_CAINFO
+              value: /certs/ca.crt
+            {{- end }}
+          ports:
+            {{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+              protocol: TCP
+            {{- end }}
+          volumeMounts:
+            - name: skills
+              mountPath: /skills
+            {{- if .Values.git.caSecret.name }}
+            - name: ca-cert
+              mountPath: /certs
+              readOnly: true
+            {{- end }}
+          resources:
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+
+        # ── Main container: FastMCP skills server via supergateway ───────────
+        - name: mcp-skills-server
+          image: {{ include "mcp-skills-server.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: NODE_OPTIONS
+              # Caps the V8 heap of the supergateway Node.js process.
+              # Keep this value ≤ resources.limits.memory / 2.
+              value: "--max-old-space-size={{ .Values.nodeHeapSizeMb }}"
+            - name: SKILLS_DIR
+              value: /skills
+            - name: SERVER_NAME
+              value: {{ .Values.server.name | quote }}
+          ports:
+            - name: mcp
+              containerPort: 3000
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold }}
+          volumeMounts:
+            - name: skills
+              mountPath: /skills
+              readOnly: true
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      volumes:
+        # Ephemeral shared volume for the cloned skills repository.
+        # emptyDir is appropriate here because skills are always re-cloneable
+        # from the source repository — no durable state required beyond the pod.
+        - name: skills
+          emptyDir: {}
+        {{- if .Values.git.caSecret.name }}
+        - name: ca-cert
+          secret:
+            secretName: {{ .Values.git.caSecret.name | quote }}
+            items:
+              - key: {{ .Values.git.caSecret.key | quote }}
+                path: ca.crt
+        {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

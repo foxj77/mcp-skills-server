@@ -1,0 +1,8 @@
+{
+  "name": "mcp-skills-server",
+  "private": true,
+  "description": "Tracks Dockerfile npm dependencies for Dependabot version updates. Not installed locally — versions here must stay in sync with the RUN npm install -g line in the Dockerfile.",
+  "dependencies": {
+    "supergateway": "3.4.3"
+  }
+}

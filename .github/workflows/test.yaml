@@ -1,0 +1,167 @@
+name: Integration Test
+
+# Builds the image from the current Dockerfile, starts it against the test
+# fixtures, and runs the smoke test. Also lints and templates the Helm chart.
+#
+# Jobs:
+#   smoke-test   — exercises MCP session init, tools/list, and tool invocation
+#   helm-test    — lint, template, and schema validation for the Helm chart
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  smoke-test:
+    name: Build and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image (single-arch for speed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: mcp-skills-server:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container
+        run: |
+          docker run -d \
+            --name mcp-skills \
+            -p 3000:3000 \
+            -v "$PWD/tests/fixtures:/skills:ro" \
+            -e SKILLS_DIR=/skills \
+            -e SERVER_NAME=test-skills \
+            -e NODE_OPTIONS=--max-old-space-size=128 \
+            mcp-skills-server:ci
+
+      - name: Wait for server to be ready
+        run: |
+          echo "Waiting for MCP server..."
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null -X POST http://localhost:3000/mcp \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json, text/event-stream" \
+                -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1.0"}}}'; then
+              echo "Server is ready."
+              exit 0
+            fi
+            echo "  attempt $i/20 — retrying in 2s"
+            sleep 2
+          done
+          echo "Server did not become ready in time."
+          docker logs mcp-skills
+          exit 1
+
+      - name: Run smoke test
+        run: MCP_URL=http://localhost:3000/mcp ./tests/smoke-test.sh
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker logs mcp-skills
+
+  helm-test:
+    name: Helm lint and template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint chart/
+
+      - name: Template chart (default values)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test > /tmp/default-render.yaml
+          grep -q "SKILLS_DIR" /tmp/default-render.yaml
+          grep -q "/skills" /tmp/default-render.yaml
+          echo "SKILLS_DIR present in rendered Deployment"
+
+      - name: Template chart (custom values)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            --set image.tag=0.1.0 \
+            --set server.name=my-skills \
+            --set git.repoUrl=https://github.com/org/skills \
+            --set git.branch=main \
+            --set git.syncIntervalSeconds=300 \
+            --set resources.limits.memory=512Mi \
+            --set nodeHeapSizeMb=192 \
+            > /dev/null
+
+      - name: Template chart (webhook enabled)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            --set webhook.enabled=true \
+            --set webhook.ingress.enabled=true \
+            --set webhook.ingress.host=skills-webhook.example.com \
+            > /tmp/webhook-render.yaml
+          grep -q "kind: Ingress" /tmp/webhook-render.yaml
+          grep -q "skills-webhook.example.com" /tmp/webhook-render.yaml
+          grep -q "WEBHOOK_ENABLED" /tmp/webhook-render.yaml
+          echo "webhook template assertions passed"
+
+      - name: Template chart (webhook disabled — assert no Ingress)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            > /tmp/no-webhook-render.yaml
+          if grep -q "kind: Ingress" /tmp/no-webhook-render.yaml; then
+            echo "Ingress should not appear when webhook.enabled=false"
+            exit 1
+          fi
+          echo "Ingress correctly absent when webhook disabled"
+
+      - name: Template chart (kagent enabled)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            --set kagent.enabled=true \
+            --set kagent.namespace=kagent \
+            --set kagent.serverName=skills-mcp \
+            > /tmp/kagent-render.yaml
+          grep -q "kind: RemoteMCPServer" /tmp/kagent-render.yaml
+          grep -q "namespace: kagent"     /tmp/kagent-render.yaml
+          grep -q "name: skills-mcp"      /tmp/kagent-render.yaml
+          grep -q "STREAMABLE_HTTP"        /tmp/kagent-render.yaml
+          echo "kagent template assertions passed"
+
+      - name: Template chart (kagent disabled — assert no RemoteMCPServer)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            > /tmp/no-kagent-render.yaml
+          if grep -q "kind: RemoteMCPServer" /tmp/no-kagent-render.yaml; then
+            echo "RemoteMCPServer should not appear when kagent.enabled=false"
+            exit 1
+          fi
+          echo "RemoteMCPServer correctly absent when kagent disabled"
+
+      - name: Validate schema rejects invalid values
+        run: |
+          if helm template mcp-skills-server chart/ \
+            --set service.type=InvalidType > /dev/null 2>&1; then
+            echo "Schema validation should have rejected InvalidType"
+            exit 1
+          fi
+          echo "Schema validation correctly rejected invalid service type"
+
+      - name: Template chart (CA cert secret)
+        run: |
+          helm template mcp-skills-server chart/ --namespace test \
+            --set git.caSecret.name=internal-ca \
+            --set git.patSecret.name=git-pat \
+            > /tmp/ca-render.yaml
+          grep -q "secretName: internal-ca" /tmp/ca-render.yaml
+          grep -q "GIT_SSL_CAINFO" /tmp/ca-render.yaml
+          echo "CA cert template assertions passed"

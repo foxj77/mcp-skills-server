@@ -1,0 +1,36 @@
+{{- if and .Values.webhook.enabled .Values.webhook.ingress.enabled }}
+# Ingress for the webhook receiver port only.
+# The MCP endpoint (/mcp) is intentionally not exposed via Ingress — it is
+# accessed in-cluster by kagent and other MCP clients via ClusterIP.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mcp-skills-server.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "mcp-skills-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook
+  {{- with .Values.webhook.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.webhook.ingress.className }}
+  ingressClassName: {{ .Values.webhook.ingress.className | quote }}
+  {{- end }}
+  {{- if .Values.webhook.ingress.tls }}
+  tls:
+    {{- toYaml .Values.webhook.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.webhook.ingress.host | quote }}
+      http:
+        paths:
+          - path: /webhook
+            pathType: Exact
+            backend:
+              service:
+                name: {{ include "mcp-skills-server.fullname" . }}
+                port:
+                  name: webhook
+{{- end }}

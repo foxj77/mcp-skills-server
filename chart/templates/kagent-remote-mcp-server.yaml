@@ -1,0 +1,21 @@
+{{- if .Values.kagent.enabled }}
+# This resource is created in kagent.namespace (default: "kagent"), not in
+# .Release.Namespace. kagent's controllers watch their own namespace for
+# RemoteMCPServer resources; the URL crosses namespaces automatically via
+# the full cluster DNS name. Helm tracks and cleans up this resource on
+# `helm uninstall` regardless of which namespace it lives in.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: {{ .Values.kagent.serverName }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "mcp-skills-server.labels" . | nindent 4 }}
+    app.kubernetes.io/component: remote-mcp-server
+spec:
+  description: {{ .Values.kagent.description | quote }}
+  protocol: STREAMABLE_HTTP
+  url: {{ include "mcp-skills-server.mcpEndpoint" . }}
+  timeout: {{ .Values.kagent.timeout }}
+  sseReadTimeout: {{ .Values.kagent.sseReadTimeout }}
+{{- end }}

@@ -1,0 +1,184 @@
+name: Build and Publish
+
+# Triggered when release-please merges a release PR and creates a GitHub
+# Release. Builds a multi-arch image and pushes it to GHCR with full SemVer
+# tags (e.g. 1.2.3, 1.2, 1, latest) plus a sha- tag for traceability.
+# Also packages the Helm chart and publishes it to GHCR as an OCI artifact.
+#
+# Can also be triggered manually via workflow_dispatch for ad-hoc builds
+# (these receive only sha- and 'edge' tags, not SemVer or latest).
+#
+# The smoke-test job must pass before anything is pushed. This gates every
+# release on a full functional test of the Dockerfile, catching any breakage
+# introduced by base-image bumps, dependency updates, or CMD changes.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "SemVer to publish (e.g. 0.2.0). Stamps Docker + Helm with full release tags. Leave blank for an edge/sha-only build."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+  CHART_REGISTRY: oci://ghcr.io/foxj77/charts
+
+jobs:
+  smoke-test:
+    name: Smoke test before publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image (amd64 only for speed)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: mcp-skills-server:pre-release
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container
+        run: |
+          docker run -d \
+            --name mcp-skills \
+            -p 3000:3000 \
+            -v "$PWD/tests/fixtures:/skills:ro" \
+            -e SKILLS_DIR=/skills \
+            -e SERVER_NAME=test-skills \
+            -e NODE_OPTIONS=--max-old-space-size=128 \
+            mcp-skills-server:pre-release
+
+      - name: Wait for server to be ready
+        run: |
+          echo "Waiting for MCP server..."
+          for i in $(seq 1 20); do
+            if curl -sf -o /dev/null -X POST http://localhost:3000/mcp \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json, text/event-stream" \
+                -d '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"healthcheck","version":"1.0"}}}'; then
+              echo "Server is ready."
+              exit 0
+            fi
+            echo "  attempt $i/20 — retrying in 2s"
+            sleep 2
+          done
+          echo "Server did not become ready in time."
+          docker logs mcp-skills
+          exit 1
+
+      - name: Run smoke test
+        run: MCP_URL=http://localhost:3000/mcp ./tests/smoke-test.sh
+
+      - name: Print container logs on failure
+        if: failure()
+        run: docker logs mcp-skills
+
+  build:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    needs: [smoke-test]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '') }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' && inputs.version == '' }}
+            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.title=mcp-skills-server
+            org.opencontainers.image.description=Git-synced MCP skills server for Kubernetes
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  helm-publish:
+    name: Package and push Helm chart
+    runs-on: ubuntu-latest
+    needs: [smoke-test]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp version into Chart.yaml
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" chart/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" chart/Chart.yaml
+
+      - name: Lint chart
+        run: helm lint chart/
+
+      - name: Package chart
+        run: helm package chart/
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to GHCR OCI registry
+        run: |
+          helm push \
+            mcp-skills-server-${{ steps.version.outputs.version }}.tgz \
+            ${{ env.CHART_REGISTRY }}

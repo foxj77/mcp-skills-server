@@ -1,0 +1,65 @@
+MCP Skills Server is running.
+
+The MCP Streamable HTTP endpoint is available inside the cluster at:
+
+  {{ include "mcp-skills-server.mcpEndpoint" . }}
+
+Skills are synced from: {{ .Values.git.repoUrl | default "(git.repoUrl not set)" }}
+Branch: {{ .Values.git.branch }} | Sync interval: {{ .Values.git.syncIntervalSeconds }}s
+
+To verify the deployment:
+
+  kubectl get pods -n {{ .Release.Namespace }} \
+    -l "app.kubernetes.io/name={{ include "mcp-skills-server.name" . }},app.kubernetes.io/instance={{ .Release.Name }}"
+
+To run the smoke test from your local machine (requires curl and jq):
+
+  kubectl port-forward -n {{ .Release.Namespace }} \
+    svc/{{ include "mcp-skills-server.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} &
+  MCP_URL=http://localhost:{{ .Values.service.port }}/mcp ./tests/smoke-test.sh
+{{ if .Values.webhook.enabled }}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Webhook receiver
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Webhook receiver is enabled on port {{ .Values.webhook.port }}.
+In-cluster endpoint: {{ include "mcp-skills-server.webhookEndpoint" . }}
+{{ if .Values.webhook.ingress.enabled }}
+External webhook URL: https://{{ .Values.webhook.ingress.host }}/webhook
+
+Configure this URL in your GitHub/GitLab repository settings:
+  GitHub:  Settings → Webhooks → Add webhook
+  GitLab:  Settings → Webhooks
+  Events:  Push events only
+  Secret:  Value from secret "{{ .Values.webhook.hmacSecret.name | default "(hmacSecret.name not set)" }}"
+{{ else }}
+Ingress is disabled — the webhook port is only reachable in-cluster.
+To expose it externally, set webhook.ingress.enabled=true and configure
+webhook.ingress.host (requires an Ingress controller).
+{{ end }}
+{{ end }}
+{{ if .Values.kagent.enabled }}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+kagent integration
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+A RemoteMCPServer named "{{ .Values.kagent.serverName }}" has been created in
+the "{{ .Values.kagent.namespace }}" namespace. Add it to each agent's tool list:
+
+  - type: McpServer
+    mcpServer:
+      apiGroup: kagent.dev
+      kind: RemoteMCPServer
+      name: {{ .Values.kagent.serverName }}
+
+To verify the RemoteMCPServer was registered:
+
+  kubectl get remotemcpserver -n {{ .Values.kagent.namespace }} {{ .Values.kagent.serverName }}
+{{ else }}
+To enable kagent integration (creates a RemoteMCPServer in the kagent namespace):
+
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/foxj77/charts/mcp-skills-server \
+    --reuse-values \
+    --set kagent.enabled=true \
+    --set kagent.namespace=<your-kagent-namespace>
+{{ end }}

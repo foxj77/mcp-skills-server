@@ -1,0 +1,150 @@
+image:
+  repository: ghcr.io/foxj77/mcp-skills-server
+  # Tag defaults to the chart's appVersion when left empty.
+  # Pin to an exact version tag (e.g. "0.2.0") in production to avoid
+  # unexpected upgrades. Avoid mutable tags like "latest" with
+  # imagePullPolicy: IfNotPresent — Kubernetes will not pull a new image
+  # if one with that tag is already cached on the node.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Name the MCP server announces to clients. Visible in kagent UI and MCP
+# client tool listings. Override per-deployment (e.g. "acme-skills").
+server:
+  name: "mcp-skills-server"
+
+# Git repository configuration — the source of truth for skills.
+git:
+  # Full HTTPS URL of the skills repository.
+  # Example: https://github.com/my-org/skills
+  # Example: https://gitlab.internal/platform/skills
+  repoUrl: ""
+
+  # Branch to track.
+  branch: "main"
+
+  # Polling interval in seconds. git pull runs on this cadence as a
+  # fallback when webhooks are disabled or miss an event.
+  syncIntervalSeconds: 900
+
+  # Reference to an existing Kubernetes Secret containing the
+  # Personal Access Token for repository authentication.
+  # The init container and sidecar use this to clone and pull.
+  # Create with SOPS: write to /tmp, sops --encrypt, save as .enc.yaml.
+  patSecret:
+    # Leave name empty to skip PAT injection (public repos only).
+    name: ""
+    key: "token"
+
+  # Reference to an existing Kubernetes Secret containing the PEM-encoded
+  # CA certificate for self-hosted GitLab instances with internal CAs.
+  # The cert is mounted into the init container and sidecar and set as
+  # GIT_SSL_CAINFO so git trusts the server's TLS certificate.
+  caSecret:
+    # Leave name empty if your Git host uses a publicly-trusted CA.
+    name: ""
+    key: "ca.crt"
+
+# Optional webhook receiver — enables immediate sync on push events.
+# When disabled, sync falls back to polling only (git.syncIntervalSeconds).
+webhook:
+  enabled: false
+
+  # Port the sidecar listens on for webhook POST requests.
+  port: 9000
+
+  # Reference to an existing Kubernetes Secret containing the HMAC secret
+  # (GitHub) or plain token (GitLab) used to authenticate webhook payloads.
+  # Leave name empty to skip signature verification (not recommended).
+  hmacSecret:
+    name: ""
+    key: "secret"
+
+  # Ingress for the webhook port. Only relevant when webhook.enabled=true.
+  # Requires an Ingress controller to be installed in the cluster.
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    # Example annotations for cert-manager + nginx:
+    # annotations:
+    #   kubernetes.io/ingress.class: nginx
+    #   cert-manager.io/cluster-issuer: letsencrypt-prod
+    annotations: {}
+    tls: []
+
+service:
+  type: ClusterIP
+  # Port for the MCP Streamable HTTP endpoint (/mcp).
+  port: 3000
+
+# Node.js heap size cap in MiB applied to supergateway via NODE_OPTIONS.
+# The skills server has one Node.js process (supergateway) and one Python
+# child process. Only the Node.js heap is capped here; Python memory is
+# bounded by resources.limits.memory minus this value.
+# Rule: nodeHeapSizeMb must be ≤ (resources.limits.memory / 2).
+nodeHeapSizeMb: 128
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    # Must cover: supergateway heap (nodeHeapSizeMb) + Python process + OS overhead.
+    # Default 384Mi = 128Mi Node heap + ~128Mi Python + 128Mi headroom.
+    memory: 384Mi
+
+# Probes use tcpSocket rather than httpGet because the MCP endpoint requires
+# a valid JSON-RPC initialize message before returning a non-error response.
+# A plain HTTP GET returns 4xx, which Kubernetes would interpret as unhealthy.
+readinessProbe:
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+livenessProbe:
+  initialDelaySeconds: 20
+  periodSeconds: 20
+  failureThreshold: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# kagent integration — creates a RemoteMCPServer resource so agents can
+# reference this server by name in their tool lists without hard-coding the URL.
+#
+# Enable with: --set kagent.enabled=true
+#
+# Namespace note: the RemoteMCPServer is created in kagent.namespace, NOT in
+# the namespace where this chart is installed. This is intentional — kagent's
+# controllers watch the kagent namespace for RemoteMCPServer resources, not
+# the namespace where the skills server runs. The URL crosses namespaces
+# automatically via cluster DNS.
+kagent:
+  enabled: false
+
+  # Namespace where kagent is installed.
+  namespace: kagent
+
+  # Name of the RemoteMCPServer resource. Agents reference this in their
+  # tool lists, e.g.:
+  #   mcpServer:
+  #     kind: RemoteMCPServer
+  #     name: <serverName>
+  serverName: skills-mcp
+
+  description: "Git-synced skills registry — exposes skills as MCP tools"
+
+  # Timeout for individual MCP tool calls.
+  timeout: 30s
+
+  # Timeout for the long-lived SSE read connection. Must be much larger
+  # than timeout — this is the connection keep-alive, not the per-call deadline.
+  sseReadTimeout: 5m0s

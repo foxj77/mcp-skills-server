@@ -1,0 +1,21 @@
+apiVersion: v2
+name: mcp-skills-server
+description: Git-synced MCP skills server — exposes skills from a version-controlled repository as MCP tools over Streamable HTTP
+type: application
+# Version is replaced at publish time with the GitHub Release version.
+# Do not edit manually — it is managed by the CI pipeline.
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/foxj77/mcp-skills-server
+sources:
+  - https://github.com/foxj77/mcp-skills-server
+maintainers:
+  - name: foxj77
+    url: https://github.com/foxj77
+keywords:
+  - mcp
+  - ai
+  - skills
+  - kagent
+  - kubernetes
+  - fastmcp
