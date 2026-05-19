@@ -49,6 +49,13 @@ git:
     name: ""
     key: "ca.crt"
 
+  # Optional subdirectory within the cloned repository to serve skills from.
+  # When set, SKILLS_DIR inside the main container is /skills/<skillsSubdir>,
+  # so you can point at a monorepo and serve only the skills subtree.
+  # The git clone and sidecar still operate on the full repository root.
+  # Example: apps/kagent/skills
+  skillsSubdir: ""
+
 # Optional webhook receiver — enables immediate sync on push events.
 # When disabled, sync falls back to polling only (git.syncIntervalSeconds).
 webhook:

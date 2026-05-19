@@ -47,6 +47,11 @@
           "type": "integer",
           "minimum": 60
         },
+        "skillsSubdir": {
+          "type": "string",
+          "description": "Optional subdirectory within the cloned repository to serve skills from. When set, SKILLS_DIR in the main container is /skills/<skillsSubdir>. Leave empty to serve from the repository root.",
+          "default": ""
+        },
         "patSecret": {
           "type": "object",
           "properties": {

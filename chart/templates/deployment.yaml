@@ -155,7 +155,9 @@ spec:
               # Keep this value ≤ resources.limits.memory / 2.
               value: "--max-old-space-size={{ .Values.nodeHeapSizeMb }}"
             - name: SKILLS_DIR
-              value: /skills
+              # When git.skillsSubdir is set the server scans the subdirectory
+              # within the cloned repo; the sidecar still operates on /skills.
+              value: {{ if .Values.git.skillsSubdir }}/skills/{{ .Values.git.skillsSubdir }}{{ else }}/skills{{ end }}
             - name: SERVER_NAME
               value: {{ .Values.server.name | quote }}
           ports:
